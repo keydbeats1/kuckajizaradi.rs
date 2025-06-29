@@ -5,15 +5,16 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { CreditCard, Bitcoin, Shield, CheckCircle, ArrowLeft, Loader2, Copy } from "lucide-react"
+import { CreditCard, Bitcoin, Shield, CheckCircle, ArrowLeft, Loader2, AlertCircle } from "lucide-react"
 
 export default function PaymentPage() {
   const [paymentData, setPaymentData] = useState<any>(null)
-  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string>("crypto")
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string>("card")
   const [isProcessing, setIsProcessing] = useState(false)
   const [paymentStep, setPaymentStep] = useState<"select" | "details" | "processing" | "success">("select")
   const [copied, setCopied] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [cardForm, setCardForm] = useState({
     cardNumber: "",
     expiryDate: "",
@@ -96,6 +97,7 @@ export default function PaymentPage() {
   const handlePaymentMethodSelect = (methodId: string) => {
     setSelectedPaymentMethod(methodId)
     setPaymentStep("details")
+    setError(null)
   }
 
   const handleCardFormChange = (field: string, value: string) => {
@@ -128,9 +130,17 @@ export default function PaymentPage() {
   const handleCardPayment = async () => {
     setIsProcessing(true)
     setPaymentStep("processing")
+    setError(null)
 
     try {
-      // Create Atlos payment with card details
+      console.log("🚀 Starting card payment process...")
+
+      // Validate card form
+      if (!cardForm.cardholderName || !cardForm.cardNumber || !cardForm.expiryDate || !cardForm.cvv) {
+        throw new Error("Molimo popunite sva polja kartice")
+      }
+
+      // Create Atlos payment
       const response = await fetch("/api/atlos/create-payment", {
         method: "POST",
         headers: {
@@ -142,27 +152,32 @@ export default function PaymentPage() {
           orderId: paymentData.orderId,
           customerEmail: paymentData.formData.email || `${paymentData.formData.username}@temp.com`,
           customerName: paymentData.formData.fullName,
+          customerCountry: paymentData.formData.country,
+          customerCity: paymentData.formData.city,
           description: `${paymentData.selectedOffer.title} - Kuckaj&Zaradi`,
           paymentMethod: "card",
+          packageType: paymentData.selectedOffer.id,
           cardDetails: cardForm,
         }),
       })
 
+      const result = await response.json()
+      console.log("📥 Payment API response:", result)
+
       if (!response.ok) {
-        throw new Error("Failed to create payment")
+        throw new Error(result.details || result.error || "Failed to create payment")
       }
 
-      const result = await response.json()
-
-      if (result.paymentUrl) {
+      if (result.success && result.paymentUrl) {
+        console.log("✅ Redirecting to payment URL:", result.paymentUrl)
         // Redirect to Atlos payment page
         window.location.href = result.paymentUrl
       } else {
-        setPaymentStep("success")
+        throw new Error("No payment URL received from payment gateway")
       }
     } catch (error) {
-      console.error("Payment failed:", error)
-      alert("Došlo je do greške prilikom plaćanja. Molimo pokušajte ponovo.")
+      console.error("❌ Payment failed:", error)
+      setError(error instanceof Error ? error.message : "Došlo je do greške prilikom plaćanja")
       setPaymentStep("details")
     } finally {
       setIsProcessing(false)
@@ -172,11 +187,51 @@ export default function PaymentPage() {
   const handleCryptoPayment = async () => {
     setIsProcessing(true)
     setPaymentStep("processing")
+    setError(null)
 
-    // Simulate payment processing
-    await new Promise((resolve) => setTimeout(resolve, 3000))
-    setPaymentStep("success")
-    setIsProcessing(false)
+    try {
+      console.log("🚀 Starting crypto payment process...")
+
+      const response = await fetch("/api/atlos/create-payment", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          amount: Number.parseFloat(paymentData.selectedOffer.price),
+          currency: "EUR",
+          orderId: paymentData.orderId,
+          customerEmail: paymentData.formData.email || `${paymentData.formData.username}@temp.com`,
+          customerName: paymentData.formData.fullName,
+          customerCountry: paymentData.formData.country,
+          customerCity: paymentData.formData.city,
+          description: `${paymentData.selectedOffer.title} - Kuckaj&Zaradi`,
+          paymentMethod: "crypto",
+          packageType: paymentData.selectedOffer.id,
+        }),
+      })
+
+      const result = await response.json()
+      console.log("📥 Crypto payment API response:", result)
+
+      if (!response.ok) {
+        throw new Error(result.details || result.error || "Failed to create payment")
+      }
+
+      if (result.success && result.paymentUrl) {
+        console.log("✅ Redirecting to crypto payment URL:", result.paymentUrl)
+        window.location.href = result.paymentUrl
+      } else {
+        // Fallback to manual crypto payment
+        setPaymentStep("success")
+      }
+    } catch (error) {
+      console.error("❌ Crypto payment failed:", error)
+      setError(error instanceof Error ? error.message : "Došlo je do greške prilikom plaćanja")
+      setPaymentStep("details")
+    } finally {
+      setIsProcessing(false)
+    }
   }
 
   const copyToClipboard = (text: string) => {
@@ -259,6 +314,19 @@ export default function PaymentPage() {
           <div className="lg:col-span-2">
             <Card className="bg-white rounded-2xl shadow-lg border-0">
               <CardContent className="p-8">
+                {/* Error Display */}
+                {error && (
+                  <div className="mb-6 bg-red-50 border border-red-200 rounded-xl p-4">
+                    <div className="flex items-center gap-3">
+                      <AlertCircle className="w-5 h-5 text-red-600" />
+                      <div>
+                        <h4 className="font-bold text-red-900">Greška</h4>
+                        <p className="text-red-800 text-sm">{error}</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {paymentStep === "select" && (
                   <div>
                     <h2 className="text-2xl font-bold text-gray-900 mb-6">Izaberite način plaćanja</h2>
@@ -403,7 +471,7 @@ export default function PaymentPage() {
                         {isProcessing ? (
                           <>
                             <Loader2 className="w-5 h-5 animate-spin mr-2" />
-                            Obrađuje se...
+                            Kreiranje plaćanja...
                           </>
                         ) : (
                           `Plati €${paymentData.selectedOffer.price}`
@@ -437,58 +505,19 @@ export default function PaymentPage() {
                         </ul>
                       </div>
 
-                      <div className="bg-gray-50 rounded-xl p-6">
-                        <h4 className="font-bold text-gray-900 mb-4">Instrukcije za plaćanje:</h4>
-                        <div className="space-y-4">
-                          <div>
-                            <Label className="text-sm font-semibold text-gray-700">Iznos za plaćanje:</Label>
-                            <div className="flex items-center gap-2 mt-1">
-                              <Input value={`€${paymentData.selectedOffer.price}`} readOnly className="bg-white" />
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => copyToClipboard(paymentData.selectedOffer.price)}
-                              >
-                                {copied ? <CheckCircle className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                              </Button>
-                            </div>
-                          </div>
-
-                          <div>
-                            <Label className="text-sm font-semibold text-gray-700">Wallet adresa (USDT TRC20):</Label>
-                            <div className="flex items-center gap-2 mt-1">
-                              <Input
-                                value="TQn9Y2khEsLJW1ChVWFMSMeRDow5KcbLSE"
-                                readOnly
-                                className="bg-white font-mono text-sm"
-                              />
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => copyToClipboard("TQn9Y2khEsLJW1ChVWFMSMeRDow5KcbLSE")}
-                              >
-                                {copied ? <CheckCircle className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                              </Button>
-                            </div>
-                          </div>
-
-                          <div>
-                            <Label className="text-sm font-semibold text-gray-700">Referenca (obavezno):</Label>
-                            <div className="flex items-center gap-2 mt-1">
-                              <Input value={paymentData.orderId} readOnly className="bg-white font-mono text-sm" />
-                              <Button size="sm" variant="outline" onClick={() => copyToClipboard(paymentData.orderId)}>
-                                {copied ? <CheckCircle className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                              </Button>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
                       <Button
                         onClick={handleCryptoPayment}
+                        disabled={isProcessing}
                         className="w-full h-14 text-lg font-bold bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white rounded-xl"
                       >
-                        Poslao sam plaćanje
+                        {isProcessing ? (
+                          <>
+                            <Loader2 className="w-5 h-5 animate-spin mr-2" />
+                            Kreiranje plaćanja...
+                          </>
+                        ) : (
+                          "Nastavi sa crypto plaćanjem"
+                        )}
                       </Button>
                     </div>
                   </div>
@@ -497,27 +526,16 @@ export default function PaymentPage() {
                 {paymentStep === "processing" && (
                   <div className="text-center py-12">
                     <Loader2 className="w-16 h-16 animate-spin mx-auto mb-6 text-orange-500" />
-                    <h2 className="text-2xl font-bold text-gray-900 mb-4">Obrađujemo vaše plaćanje...</h2>
-                    <p className="text-gray-600">Molimo sačekajte dok proveravamo transakciju</p>
+                    <h2 className="text-2xl font-bold text-gray-900 mb-4">Kreiranje plaćanja...</h2>
+                    <p className="text-gray-600">Molimo sačekajte dok pripravljamo vaše plaćanje</p>
                   </div>
                 )}
 
                 {paymentStep === "success" && (
                   <div className="text-center py-12">
                     <CheckCircle className="w-16 h-16 mx-auto mb-6 text-green-500" />
-                    <h2 className="text-2xl font-bold text-gray-900 mb-4">Plaćanje uspešno!</h2>
-                    <p className="text-gray-600 mb-6">
-                      Hvala vam! Kontaktiraćemo vas u roku od 24 sata sa pristupom kursu.
-                    </p>
-                    <div className="bg-green-50 border border-green-200 rounded-xl p-6">
-                      <h3 className="font-bold text-green-900 mb-2">Sledeći koraci:</h3>
-                      <ul className="text-green-800 text-sm space-y-1">
-                        <li>✅ Vaše plaćanje je potvrđeno</li>
-                        <li>✅ Dobićete pristup Discord/Telegram grupi</li>
-                        <li>✅ Materijali kursa će biti poslati na email</li>
-                        <li>✅ Live sesije počinju odmah</li>
-                      </ul>
-                    </div>
+                    <h2 className="text-2xl font-bold text-gray-900 mb-4">Plaćanje kreiranje!</h2>
+                    <p className="text-gray-600 mb-6">Bićete preusmeren na sigurnu stranicu za plaćanje.</p>
                   </div>
                 )}
               </CardContent>
