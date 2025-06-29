@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { CreditCard, Bitcoin, Shield, CheckCircle, ArrowLeft, Loader2 } from "lucide-react"
 
-// Declare Atlos global variable
+// Declare Atlos global variable with extended interface
 declare global {
   interface Window {
     atlos: {
@@ -13,6 +13,9 @@ declare global {
         merchantId: string
         orderId: string
         orderAmount: number
+        paymentMethods?: string[] // Add payment methods parameter
+        preferredMethod?: string // Add preferred method parameter
+        currency?: string // Add currency parameter
         onSuccess?: (result: any) => void
         onCancel?: () => void
         onError?: (error: any) => void
@@ -113,6 +116,7 @@ export default function PaymentPage() {
       icon: <CreditCard className="w-8 h-8" />,
       color: "from-blue-500 to-purple-500",
       popular: true,
+      atlasMethod: "card", // Atlos payment method identifier
     },
     {
       id: "crypto",
@@ -120,6 +124,7 @@ export default function PaymentPage() {
       description: "Bitcoin, USDT, USDC - Bez KYC",
       icon: <Bitcoin className="w-8 h-8" />,
       color: "from-orange-500 to-yellow-500",
+      atlasMethod: "crypto", // Atlos payment method identifier
     },
   ]
 
@@ -143,13 +148,17 @@ export default function PaymentPage() {
     setPaymentStep("processing")
 
     try {
-      console.log("🚀 Starting Atlos payment...")
+      console.log("🚀 Starting Atlos payment with method:", selectedPaymentMethod)
 
-      // Use Atlos JavaScript widget
-      window.atlos.Pay({
+      // Get the selected payment method configuration
+      const selectedMethod = paymentMethods.find((method) => method.id === selectedPaymentMethod)
+
+      // Configure Atlos payment based on selected method
+      const atlasConfig: any = {
         merchantId: "RJNO27U9TT", // Your merchant ID from Atlos dashboard
         orderId: paymentData.orderId,
         orderAmount: Number.parseFloat(paymentData.selectedOffer.price),
+        currency: "EUR", // Specify currency
         onSuccess: (result: any) => {
           console.log("✅ Payment successful:", result)
           setPaymentStep("success")
@@ -174,13 +183,90 @@ export default function PaymentPage() {
           setPaymentStep("details")
           alert("Payment failed. Please try again.")
         },
-      })
+      }
+
+      // Add payment method specific configuration
+      if (selectedPaymentMethod === "card") {
+        // For card payments, try to specify card-only methods
+        atlasConfig.paymentMethods = ["card", "visa", "mastercard"]
+        atlasConfig.preferredMethod = "card"
+      } else if (selectedPaymentMethod === "crypto") {
+        // For crypto payments, specify crypto methods
+        atlasConfig.paymentMethods = ["crypto", "bitcoin", "usdt", "usdc"]
+        atlasConfig.preferredMethod = "crypto"
+      }
+
+      console.log("📤 Atlos config:", atlasConfig)
+
+      // Use Atlos JavaScript widget
+      window.atlos.Pay(atlasConfig)
     } catch (error) {
       console.error("❌ Failed to start payment:", error)
       setIsProcessing(false)
       setPaymentStep("details")
       alert("Failed to start payment. Please try again.")
     }
+  }
+
+  // Alternative approach: Create separate payment buttons for different methods
+  const handleCardPayment = () => {
+    if (!atlasLoaded || !window.atlos || !paymentData) return
+
+    setIsProcessing(true)
+    console.log("💳 Starting CARD payment specifically")
+
+    window.atlos.Pay({
+      merchantId: "RJNO27U9TT",
+      orderId: paymentData.orderId,
+      orderAmount: Number.parseFloat(paymentData.selectedOffer.price),
+      currency: "EUR",
+      paymentMethods: ["card"], // Try to force card only
+      preferredMethod: "card",
+      onSuccess: (result: any) => {
+        console.log("✅ Card payment successful:", result)
+        localStorage.setItem("paymentResult", JSON.stringify(result))
+        setTimeout(() => (window.location.href = "/payment-success"), 2000)
+      },
+      onCancel: () => {
+        console.log("❌ Card payment cancelled")
+        setIsProcessing(false)
+      },
+      onError: (error: any) => {
+        console.error("💥 Card payment error:", error)
+        setIsProcessing(false)
+        alert("Card payment failed. Please try again.")
+      },
+    })
+  }
+
+  const handleCryptoPayment = () => {
+    if (!atlasLoaded || !window.atlos || !paymentData) return
+
+    setIsProcessing(true)
+    console.log("₿ Starting CRYPTO payment specifically")
+
+    window.atlos.Pay({
+      merchantId: "RJNO27U9TT",
+      orderId: paymentData.orderId,
+      orderAmount: Number.parseFloat(paymentData.selectedOffer.price),
+      currency: "EUR",
+      paymentMethods: ["crypto"], // Try to force crypto only
+      preferredMethod: "crypto",
+      onSuccess: (result: any) => {
+        console.log("✅ Crypto payment successful:", result)
+        localStorage.setItem("paymentResult", JSON.stringify(result))
+        setTimeout(() => (window.location.href = "/payment-success"), 2000)
+      },
+      onCancel: () => {
+        console.log("❌ Crypto payment cancelled")
+        setIsProcessing(false)
+      },
+      onError: (error: any) => {
+        console.error("💥 Crypto payment error:", error)
+        setIsProcessing(false)
+        alert("Crypto payment failed. Please try again.")
+      },
+    })
   }
 
   if (loading) {
@@ -327,9 +413,13 @@ export default function PaymentPage() {
                         </div>
                         <ul className="text-blue-800 space-y-1 text-sm">
                           <li>✅ SSL enkripcija</li>
-                          <li>✅ Bez KYC verifikacije</li>
-                          <li>✅ Podržane sve glavne kartice i crypto</li>
-                          <li>✅ Non-custodial plaćanje</li>
+                          <li>
+                            ✅ {selectedPaymentMethod === "card" ? "PCI DSS sertifikovano" : "Bez KYC verifikacije"}
+                          </li>
+                          <li>
+                            ✅ {selectedPaymentMethod === "card" ? "3D Secure zaštićeno" : "Non-custodial plaćanje"}
+                          </li>
+                          <li>✅ Sigurno i pouzdano</li>
                         </ul>
                       </div>
 
@@ -345,28 +435,72 @@ export default function PaymentPage() {
                             <span className="font-semibold text-green-600">€{paymentData.selectedOffer.price}</span>
                           </div>
                           <div className="flex justify-between">
+                            <span>Način plaćanja:</span>
+                            <span className="font-semibold">
+                              {selectedPaymentMethod === "card" ? "Kreditna kartica" : "Cryptocurrency"}
+                            </span>
+                          </div>
+                          <div className="flex justify-between">
                             <span>Order ID:</span>
                             <span className="font-mono text-sm">{paymentData.orderId}</span>
                           </div>
                         </div>
                       </div>
 
-                      <Button
-                        onClick={handleAtlosPayment}
-                        disabled={isProcessing || !atlasLoaded}
-                        className="w-full h-14 text-lg font-bold bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white rounded-xl"
-                      >
-                        {isProcessing ? (
-                          <>
-                            <Loader2 className="w-5 h-5 animate-spin mr-2" />
-                            Otvara se Atlos plaćanje...
-                          </>
-                        ) : !atlasLoaded ? (
-                          "Učitava se Atlos..."
+                      {/* Separate buttons for different payment methods */}
+                      <div className="space-y-4">
+                        {selectedPaymentMethod === "card" ? (
+                          <Button
+                            onClick={handleCardPayment}
+                            disabled={isProcessing || !atlasLoaded}
+                            className="w-full h-14 text-lg font-bold bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white rounded-xl"
+                          >
+                            {isProcessing ? (
+                              <>
+                                <Loader2 className="w-5 h-5 animate-spin mr-2" />
+                                Otvara se plaćanje karticom...
+                              </>
+                            ) : !atlasLoaded ? (
+                              "Učitava se Atlos..."
+                            ) : (
+                              <>
+                                <CreditCard className="w-5 h-5 mr-2" />
+                                Plati karticom €{paymentData.selectedOffer.price}
+                              </>
+                            )}
+                          </Button>
                         ) : (
-                          `Plati €${paymentData.selectedOffer.price} - Atlos`
+                          <Button
+                            onClick={handleCryptoPayment}
+                            disabled={isProcessing || !atlasLoaded}
+                            className="w-full h-14 text-lg font-bold bg-gradient-to-r from-orange-500 to-yellow-500 hover:from-orange-600 hover:to-yellow-600 text-white rounded-xl"
+                          >
+                            {isProcessing ? (
+                              <>
+                                <Loader2 className="w-5 h-5 animate-spin mr-2" />
+                                Otvara se crypto plaćanje...
+                              </>
+                            ) : !atlasLoaded ? (
+                              "Učitava se Atlos..."
+                            ) : (
+                              <>
+                                <Bitcoin className="w-5 h-5 mr-2" />
+                                Plati crypto €{paymentData.selectedOffer.price}
+                              </>
+                            )}
+                          </Button>
                         )}
-                      </Button>
+
+                        {/* Fallback button */}
+                        <Button
+                          onClick={handleAtlosPayment}
+                          disabled={isProcessing || !atlasLoaded}
+                          variant="outline"
+                          className="w-full h-12 text-sm font-medium border-2 border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 bg-transparent"
+                        >
+                          Alternativno: Otvori Atlos (svi načini plaćanja)
+                        </Button>
+                      </div>
                     </div>
                   </div>
                 )}
