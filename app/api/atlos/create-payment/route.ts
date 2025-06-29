@@ -25,7 +25,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(mockResponse)
 
     // Uncomment this when you want to use real Atlos API:
-    /*
+    
     const atlasPayment = {
       merchant_id: ATLOS_MERCHANT_ID,
       amount: paymentData.amount,
@@ -57,7 +57,7 @@ export async function POST(request: NextRequest) {
 
     const result = await response.json()
     return NextResponse.json(result)
-    */
+    
   } catch (error) {
     console.error("Payment creation failed:", error)
     return NextResponse.json({ error: "Failed to create payment" }, { status: 500 })
