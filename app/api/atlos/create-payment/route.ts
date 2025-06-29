@@ -10,11 +10,34 @@ export async function POST(request: NextRequest) {
     const paymentData = await request.json()
 
     console.log("🚀 Creating Atlos payment with data:", paymentData)
+    console.log("🔑 Environment check:", {
+      hasApiKey: !!ATLOS_API_KEY,
+      hasMerchantId: !!ATLOS_MERCHANT_ID,
+      apiKeyLength: ATLOS_API_KEY?.length || 0,
+      merchantIdLength: ATLOS_MERCHANT_ID?.length || 0,
+    })
 
-    // Validate required environment variables
-    if (!ATLOS_API_KEY || !ATLOS_MERCHANT_ID) {
-      console.error("❌ Missing Atlos credentials")
-      return NextResponse.json({ error: "Payment gateway not configured properly" }, { status: 500 })
+    // More detailed validation with specific error messages
+    if (!ATLOS_API_KEY) {
+      console.error("❌ Missing ATLOS_API_KEY environment variable")
+      return NextResponse.json(
+        {
+          error: "ATLOS_API_KEY not configured",
+          details: "Please set ATLOS_API_KEY in your environment variables",
+        },
+        { status: 500 },
+      )
+    }
+
+    if (!ATLOS_MERCHANT_ID) {
+      console.error("❌ Missing ATLOS_MERCHANT_ID environment variable")
+      return NextResponse.json(
+        {
+          error: "ATLOS_MERCHANT_ID not configured",
+          details: "Please set ATLOS_MERCHANT_ID in your environment variables",
+        },
+        { status: 500 },
+      )
     }
 
     // Prepare Atlos payment request
@@ -142,5 +165,10 @@ export async function GET() {
     message: "Atlos payment API endpoint is active",
     timestamp: new Date().toISOString(),
     configured: !!(ATLOS_API_KEY && ATLOS_MERCHANT_ID),
+    environment: {
+      hasApiKey: !!ATLOS_API_KEY,
+      hasMerchantId: !!ATLOS_MERCHANT_ID,
+      baseUrl: process.env.NEXT_PUBLIC_BASE_URL,
+    },
   })
 }
