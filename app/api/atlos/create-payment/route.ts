@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
 
-// Add these to your environment variables
+// Add these to your environment variables (u Vercel-u)
 const ATLOS_API_KEY = process.env.ATLOS_API_KEY
 const ATLOS_MERCHANT_ID = process.env.ATLOS_MERCHANT_ID
 const ATLOS_API_URL = "https://api.atlos.io/v1/payments"
@@ -9,23 +9,8 @@ export async function POST(request: NextRequest) {
   try {
     const paymentData = await request.json()
 
-    // For now, let's simulate a successful response since we're having API issues
-    // In production, you would make the actual API call to Atlos
-
     console.log("Creating Atlos payment with data:", paymentData)
 
-    // Simulate successful payment creation
-    const mockResponse = {
-      success: true,
-      paymentUrl: `/payment?orderId=${paymentData.orderId}`,
-      paymentId: `atlos_${Date.now()}`,
-      orderId: paymentData.orderId,
-    }
-
-    return NextResponse.json(mockResponse)
-
-    // Uncomment this when you want to use real Atlos API:
-    
     const atlasPayment = {
       merchant_id: ATLOS_MERCHANT_ID,
       amount: paymentData.amount,
@@ -37,7 +22,7 @@ export async function POST(request: NextRequest) {
       success_url: `${process.env.NEXT_PUBLIC_BASE_URL}/payment-success`,
       cancel_url: `${process.env.NEXT_PUBLIC_BASE_URL}/payment-cancelled`,
       webhook_url: `${process.env.NEXT_PUBLIC_BASE_URL}/api/atlos/webhook`,
-      receive_currency: "USDT", // You can change this to BTC, ETH, etc.
+      receive_currency: "USDT", // Promeni ako koristiš BTC, ETH itd.
     }
 
     const response = await fetch(ATLOS_API_URL, {
@@ -56,6 +41,8 @@ export async function POST(request: NextRequest) {
     }
 
     const result = await response.json()
+    console.log("Atlos API response:", result)
+
     return NextResponse.json(result)
     
   } catch (error) {
