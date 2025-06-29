@@ -25,7 +25,6 @@ import {
   Bitcoin,
   Shield,
 } from "lucide-react"
-import { createAtlosPayment, generateOrderId } from "@/lib/atlos"
 
 export default function LandingPageClient() {
   const [selectedOffer, setSelectedOffer] = useState<string | null>(null)
@@ -88,19 +87,19 @@ export default function LandingPageClient() {
     {
       name: "Marko S.",
       earnings: "€2,450",
-      image: "/placeholder.svg?height=300&width=400",
+      image: "/images/marko-testimonial.jpg",
       text: "Neverovatno! Za samo 2 meseca sam zaradio više nego na prethodnom poslu.",
     },
     {
       name: "Ana M.",
       earnings: "€1,890",
-      image: "/placeholder.svg?height=300&width=400",
+      image: "/images/ana-testimonial.jpg",
       text: "Kurs mi je promenio život. Sada radim od kuće i zarađujem odlično.",
     },
     {
       name: "Stefan P.",
       earnings: "€3,200",
-      image: "/placeholder.svg?height=300&width=400",
+      image: "/images/stefan-testimonial.png",
       text: "Najbolja investicija koju sam napravio. Preporučujem svima!",
     },
   ]
@@ -147,59 +146,56 @@ export default function LandingPageClient() {
     }
 
     // Validate required fields
-    if (
-      !formData.fullName ||
-      !formData.age ||
-      !formData.phoneNumber ||
-      !formData.country ||
-      !formData.city ||
-      !formData.username
-    ) {
-      alert("Molimo popunite sva obavezna polja.")
+    const requiredFields = ["fullName", "age", "phoneNumber", "country", "city", "username"]
+    const missingFields = requiredFields.filter((field) => !formData[field as keyof typeof formData])
+
+    if (missingFields.length > 0) {
+      alert(`Molimo popunite sva obavezna polja: ${missingFields.join(", ")}`)
       return
     }
 
     setIsProcessingPayment(true)
 
     try {
+      // Find selected offer
       const selectedOfferData = offers.find((offer) => offer.id === selectedOffer)
       if (!selectedOfferData) {
         throw new Error("Selected offer not found")
       }
 
-      const orderId = generateOrderId()
+      // Generate order ID
+      const orderId = `kz_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
 
+      // Create payment data object
       const paymentData = {
-        amount: Number.parseFloat(selectedOfferData.price),
-        currency: "EUR",
         orderId,
-        customerEmail: `${formData.username}@temp.com`, // You might want to add email field
-        customerName: formData.fullName,
-        description: `Kuckaj&Zaradi - ${selectedOfferData.title}`,
+        formData: { ...formData },
+        selectedOffer: { ...selectedOfferData },
+        timestamp: new Date().toISOString(),
       }
 
-      const atlasResponse = await createAtlosPayment(paymentData)
+      // Try to store data
+      try {
+        if (typeof window !== "undefined" && window.localStorage) {
+          localStorage.setItem("paymentData", JSON.stringify(paymentData))
+        }
+      } catch (storageError) {
+        console.warn("Storage failed:", storageError)
+      }
 
-      if (atlasResponse.success) {
-        // Store order data for later reference
-        localStorage.setItem(
-          "orderData",
-          JSON.stringify({
-            orderId,
-            formData,
-            selectedOffer: selectedOfferData,
-            atlasPaymentId: atlasResponse.paymentId,
-          }),
-        )
-
-        // Redirect to Atlos payment page
-        window.location.href = atlasResponse.paymentUrl
-      } else {
-        throw new Error("Failed to create payment")
+      // Redirect to payment page
+      if (typeof window !== "undefined") {
+        window.location.href = "/payment"
       }
     } catch (error) {
-      console.error("Payment creation failed:", error)
-      alert("Došlo je do greške pri kreiranju plaćanja. Molimo pokušajte ponovo.")
+      console.error("Error in form submission:", error)
+
+      // Fallback to contact page
+      if (confirm("Došlo je do greške. Da li želite da vas preusmerimo na kontakt stranicu?")) {
+        if (typeof window !== "undefined") {
+          window.location.href = "/contact-for-payment"
+        }
+      }
     } finally {
       setIsProcessingPayment(false)
     }
@@ -207,6 +203,18 @@ export default function LandingPageClient() {
 
   const handleInputChange = (field: string, value: string) => {
     setFormData((prev) => ({ ...prev, [field]: value }))
+  }
+
+  const scrollToOffers = () => {
+    if (typeof window !== "undefined") {
+      const element = document.getElementById("offers")
+      if (element) {
+        element.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        })
+      }
+    }
   }
 
   return (
@@ -250,7 +258,8 @@ export default function LandingPageClient() {
           <div className="text-center">
             <Button
               size="lg"
-              className="bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white font-bold px-12 py-4 text-lg rounded-full shadow-2xl transform hover:scale-105 transition-all duration-300"
+              onClick={scrollToOffers}
+              className="bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white font-bold px-12 py-4 text-lg rounded-full shadow-2xl transform hover:scale-105 transition-all duration-300 cursor-pointer"
             >
               Započni svoju transformaciju
             </Button>
@@ -269,7 +278,7 @@ export default function LandingPageClient() {
           </div>
 
           <div className="grid lg:grid-cols-3 gap-8 mb-16 pt-24 overflow-visible">
-            {offers.map((offer, index) => (
+            {offers.map((offer) => (
               <Card
                 key={offer.id}
                 className={`relative cursor-pointer transition-all duration-500 hover:shadow-2xl hover:-translate-y-2 ${
@@ -498,6 +507,10 @@ export default function LandingPageClient() {
                     src={testimonial.image || "/placeholder.svg"}
                     alt={`Testimonial od ${testimonial.name}`}
                     className="w-full h-64 object-cover"
+                    onError={(e) => {
+                      const target = e.target as HTMLImageElement
+                      target.src = "/placeholder.svg?height=300&width=400"
+                    }}
                   />
                 </CardHeader>
                 <CardContent className="p-8">
