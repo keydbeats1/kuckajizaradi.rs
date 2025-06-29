@@ -3,24 +3,31 @@
 import { useEffect, useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { CreditCard, Bitcoin, Shield, CheckCircle, ArrowLeft, Loader2, AlertCircle } from "lucide-react"
+import { CreditCard, Bitcoin, Shield, CheckCircle, ArrowLeft, Loader2 } from "lucide-react"
+
+// Declare Atlos global variable
+declare global {
+  interface Window {
+    atlos: {
+      Pay: (config: {
+        merchantId: string
+        orderId: string
+        orderAmount: number
+        onSuccess?: (result: any) => void
+        onCancel?: () => void
+        onError?: (error: any) => void
+      }) => void
+    }
+  }
+}
 
 export default function PaymentPage() {
   const [paymentData, setPaymentData] = useState<any>(null)
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string>("card")
   const [isProcessing, setIsProcessing] = useState(false)
   const [paymentStep, setPaymentStep] = useState<"select" | "details" | "processing" | "success">("select")
-  const [copied, setCopied] = useState(false)
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [cardForm, setCardForm] = useState({
-    cardNumber: "",
-    expiryDate: "",
-    cvv: "",
-    cardholderName: "",
-  })
+  const [atlasLoaded, setAtlasLoaded] = useState(false)
 
   useEffect(() => {
     console.log("Payment page loaded")
@@ -76,6 +83,28 @@ export default function PaymentPage() {
     setLoading(false)
   }, [])
 
+  // Load Atlos script
+  useEffect(() => {
+    const script = document.createElement("script")
+    script.src = "https://atlos.io/packages/app/atlos.js"
+    script.async = true
+    script.onload = () => {
+      console.log("✅ Atlos script loaded")
+      setAtlasLoaded(true)
+    }
+    script.onerror = () => {
+      console.error("❌ Failed to load Atlos script")
+    }
+    document.body.appendChild(script)
+
+    return () => {
+      // Cleanup script on unmount
+      if (document.body.contains(script)) {
+        document.body.removeChild(script)
+      }
+    }
+  }, [])
+
   const paymentMethods = [
     {
       id: "card",
@@ -97,147 +126,61 @@ export default function PaymentPage() {
   const handlePaymentMethodSelect = (methodId: string) => {
     setSelectedPaymentMethod(methodId)
     setPaymentStep("details")
-    setError(null)
   }
 
-  const handleCardFormChange = (field: string, value: string) => {
-    setCardForm((prev) => ({ ...prev, [field]: value }))
-  }
-
-  const formatCardNumber = (value: string) => {
-    const v = value.replace(/\s+/g, "").replace(/[^0-9]/gi, "")
-    const matches = v.match(/\d{4,16}/g)
-    const match = (matches && matches[0]) || ""
-    const parts = []
-    for (let i = 0, len = match.length; i < len; i += 4) {
-      parts.push(match.substring(i, i + 4))
+  const handleAtlosPayment = () => {
+    if (!atlasLoaded || !window.atlos) {
+      alert("Atlos payment system is still loading. Please try again in a moment.")
+      return
     }
-    if (parts.length) {
-      return parts.join(" ")
-    } else {
-      return v
-    }
-  }
 
-  const formatExpiryDate = (value: string) => {
-    const v = value.replace(/\s+/g, "").replace(/[^0-9]/gi, "")
-    if (v.length >= 2) {
-      return v.substring(0, 2) + "/" + v.substring(2, 4)
+    if (!paymentData) {
+      alert("Payment data not found. Please go back and fill the form again.")
+      return
     }
-    return v
-  }
 
-  const handleCardPayment = async () => {
     setIsProcessing(true)
     setPaymentStep("processing")
-    setError(null)
 
     try {
-      console.log("🚀 Starting card payment process...")
+      console.log("🚀 Starting Atlos payment...")
 
-      // Validate card form
-      if (!cardForm.cardholderName || !cardForm.cardNumber || !cardForm.expiryDate || !cardForm.cvv) {
-        throw new Error("Molimo popunite sva polja kartice")
-      }
+      // Use Atlos JavaScript widget
+      window.atlos.Pay({
+        merchantId: "RJNO27U9TT", // Your merchant ID from Atlos dashboard
+        orderId: paymentData.orderId,
+        orderAmount: Number.parseFloat(paymentData.selectedOffer.price),
+        onSuccess: (result: any) => {
+          console.log("✅ Payment successful:", result)
+          setPaymentStep("success")
+          setIsProcessing(false)
 
-      // Create Atlos payment
-      const response = await fetch("/api/atlos/create-payment", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
+          // Store success data
+          localStorage.setItem("paymentResult", JSON.stringify(result))
+
+          // Redirect to success page after a short delay
+          setTimeout(() => {
+            window.location.href = "/payment-success"
+          }, 2000)
         },
-        body: JSON.stringify({
-          amount: Number.parseFloat(paymentData.selectedOffer.price),
-          currency: "EUR",
-          orderId: paymentData.orderId,
-          customerEmail: paymentData.formData.email || `${paymentData.formData.username}@temp.com`,
-          customerName: paymentData.formData.fullName,
-          customerCountry: paymentData.formData.country,
-          customerCity: paymentData.formData.city,
-          description: `${paymentData.selectedOffer.title} - Kuckaj&Zaradi`,
-          paymentMethod: "card",
-          packageType: paymentData.selectedOffer.id,
-          cardDetails: cardForm,
-        }),
-      })
-
-      const result = await response.json()
-      console.log("📥 Payment API response:", result)
-
-      if (!response.ok) {
-        throw new Error(result.details || result.error || "Failed to create payment")
-      }
-
-      if (result.success && result.paymentUrl) {
-        console.log("✅ Redirecting to payment URL:", result.paymentUrl)
-        // Redirect to Atlos payment page
-        window.location.href = result.paymentUrl
-      } else {
-        throw new Error("No payment URL received from payment gateway")
-      }
-    } catch (error) {
-      console.error("❌ Payment failed:", error)
-      setError(error instanceof Error ? error.message : "Došlo je do greške prilikom plaćanja")
-      setPaymentStep("details")
-    } finally {
-      setIsProcessing(false)
-    }
-  }
-
-  const handleCryptoPayment = async () => {
-    setIsProcessing(true)
-    setPaymentStep("processing")
-    setError(null)
-
-    try {
-      console.log("🚀 Starting crypto payment process...")
-
-      const response = await fetch("/api/atlos/create-payment", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
+        onCancel: () => {
+          console.log("❌ Payment cancelled by user")
+          setIsProcessing(false)
+          setPaymentStep("details")
         },
-        body: JSON.stringify({
-          amount: Number.parseFloat(paymentData.selectedOffer.price),
-          currency: "EUR",
-          orderId: paymentData.orderId,
-          customerEmail: paymentData.formData.email || `${paymentData.formData.username}@temp.com`,
-          customerName: paymentData.formData.fullName,
-          customerCountry: paymentData.formData.country,
-          customerCity: paymentData.formData.city,
-          description: `${paymentData.selectedOffer.title} - Kuckaj&Zaradi`,
-          paymentMethod: "crypto",
-          packageType: paymentData.selectedOffer.id,
-        }),
+        onError: (error: any) => {
+          console.error("💥 Payment error:", error)
+          setIsProcessing(false)
+          setPaymentStep("details")
+          alert("Payment failed. Please try again.")
+        },
       })
-
-      const result = await response.json()
-      console.log("📥 Crypto payment API response:", result)
-
-      if (!response.ok) {
-        throw new Error(result.details || result.error || "Failed to create payment")
-      }
-
-      if (result.success && result.paymentUrl) {
-        console.log("✅ Redirecting to crypto payment URL:", result.paymentUrl)
-        window.location.href = result.paymentUrl
-      } else {
-        // Fallback to manual crypto payment
-        setPaymentStep("success")
-      }
     } catch (error) {
-      console.error("❌ Crypto payment failed:", error)
-      setError(error instanceof Error ? error.message : "Došlo je do greške prilikom plaćanja")
-      setPaymentStep("details")
-    } finally {
+      console.error("❌ Failed to start payment:", error)
       setIsProcessing(false)
+      setPaymentStep("details")
+      alert("Failed to start payment. Please try again.")
     }
-  }
-
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
   }
 
   if (loading) {
@@ -314,19 +257,6 @@ export default function PaymentPage() {
           <div className="lg:col-span-2">
             <Card className="bg-white rounded-2xl shadow-lg border-0">
               <CardContent className="p-8">
-                {/* Error Display */}
-                {error && (
-                  <div className="mb-6 bg-red-50 border border-red-200 rounded-xl p-4">
-                    <div className="flex items-center gap-3">
-                      <AlertCircle className="w-5 h-5 text-red-600" />
-                      <div>
-                        <h4 className="font-bold text-red-900">Greška</h4>
-                        <p className="text-red-800 text-sm">{error}</p>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
                 {paymentStep === "select" && (
                   <div>
                     <h2 className="text-2xl font-bold text-gray-900 mb-6">Izaberite način plaćanja</h2>
@@ -377,146 +307,64 @@ export default function PaymentPage() {
                   </div>
                 )}
 
-                {paymentStep === "details" && selectedPaymentMethod === "card" && (
+                {paymentStep === "details" && (
                   <div>
                     <div className="flex items-center gap-4 mb-6">
                       <Button variant="outline" size="sm" onClick={() => setPaymentStep("select")}>
                         <ArrowLeft className="w-4 h-4 mr-2" />
                         Nazad
                       </Button>
-                      <h2 className="text-2xl font-bold text-gray-900">Plaćanje karticom</h2>
+                      <h2 className="text-2xl font-bold text-gray-900">
+                        {selectedPaymentMethod === "card" ? "Plaćanje karticom" : "Crypto plaćanje"}
+                      </h2>
                     </div>
 
                     <div className="space-y-6">
                       <div className="bg-blue-50 border border-blue-200 rounded-xl p-6">
                         <div className="flex items-center gap-3 mb-4">
                           <Shield className="w-6 h-6 text-blue-600" />
-                          <h3 className="text-lg font-bold text-blue-900">Sigurno plaćanje</h3>
+                          <h3 className="text-lg font-bold text-blue-900">Atlos - Sigurno plaćanje</h3>
                         </div>
                         <ul className="text-blue-800 space-y-1 text-sm">
                           <li>✅ SSL enkripcija</li>
-                          <li>✅ PCI DSS sertifikovano</li>
-                          <li>✅ 3D Secure zaštićeno</li>
-                          <li>✅ Podržane sve glavne kartice</li>
+                          <li>✅ Bez KYC verifikacije</li>
+                          <li>✅ Podržane sve glavne kartice i crypto</li>
+                          <li>✅ Non-custodial plaćanje</li>
                         </ul>
                       </div>
 
-                      <div className="space-y-4">
-                        <div>
-                          <Label htmlFor="cardholderName" className="text-sm font-semibold text-gray-700">
-                            Ime na kartici
-                          </Label>
-                          <Input
-                            id="cardholderName"
-                            value={cardForm.cardholderName}
-                            onChange={(e) => handleCardFormChange("cardholderName", e.target.value)}
-                            placeholder="Ime i prezime"
-                            className="mt-1"
-                            required
-                          />
-                        </div>
-
-                        <div>
-                          <Label htmlFor="cardNumber" className="text-sm font-semibold text-gray-700">
-                            Broj kartice
-                          </Label>
-                          <Input
-                            id="cardNumber"
-                            value={cardForm.cardNumber}
-                            onChange={(e) => handleCardFormChange("cardNumber", formatCardNumber(e.target.value))}
-                            placeholder="1234 5678 9012 3456"
-                            maxLength={19}
-                            className="mt-1"
-                            required
-                          />
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-4">
-                          <div>
-                            <Label htmlFor="expiryDate" className="text-sm font-semibold text-gray-700">
-                              Datum isteka
-                            </Label>
-                            <Input
-                              id="expiryDate"
-                              value={cardForm.expiryDate}
-                              onChange={(e) => handleCardFormChange("expiryDate", formatExpiryDate(e.target.value))}
-                              placeholder="MM/YY"
-                              maxLength={5}
-                              className="mt-1"
-                              required
-                            />
+                      <div className="bg-gray-50 rounded-xl p-6">
+                        <h4 className="font-bold text-gray-900 mb-4">Detalji plaćanja:</h4>
+                        <div className="space-y-2 text-gray-700">
+                          <div className="flex justify-between">
+                            <span>Paket:</span>
+                            <span className="font-semibold">{paymentData.selectedOffer.title}</span>
                           </div>
-                          <div>
-                            <Label htmlFor="cvv" className="text-sm font-semibold text-gray-700">
-                              CVV
-                            </Label>
-                            <Input
-                              id="cvv"
-                              value={cardForm.cvv}
-                              onChange={(e) => handleCardFormChange("cvv", e.target.value.replace(/\D/g, ""))}
-                              placeholder="123"
-                              maxLength={4}
-                              className="mt-1"
-                              required
-                            />
+                          <div className="flex justify-between">
+                            <span>Iznos:</span>
+                            <span className="font-semibold text-green-600">€{paymentData.selectedOffer.price}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Order ID:</span>
+                            <span className="font-mono text-sm">{paymentData.orderId}</span>
                           </div>
                         </div>
                       </div>
 
                       <Button
-                        onClick={handleCardPayment}
-                        disabled={isProcessing}
+                        onClick={handleAtlosPayment}
+                        disabled={isProcessing || !atlasLoaded}
                         className="w-full h-14 text-lg font-bold bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white rounded-xl"
                       >
                         {isProcessing ? (
                           <>
                             <Loader2 className="w-5 h-5 animate-spin mr-2" />
-                            Kreiranje plaćanja...
+                            Otvara se Atlos plaćanje...
                           </>
+                        ) : !atlasLoaded ? (
+                          "Učitava se Atlos..."
                         ) : (
-                          `Plati €${paymentData.selectedOffer.price}`
-                        )}
-                      </Button>
-                    </div>
-                  </div>
-                )}
-
-                {paymentStep === "details" && selectedPaymentMethod === "crypto" && (
-                  <div>
-                    <div className="flex items-center gap-4 mb-6">
-                      <Button variant="outline" size="sm" onClick={() => setPaymentStep("select")}>
-                        <ArrowLeft className="w-4 h-4 mr-2" />
-                        Nazad
-                      </Button>
-                      <h2 className="text-2xl font-bold text-gray-900">Crypto plaćanje</h2>
-                    </div>
-
-                    <div className="space-y-6">
-                      <div className="bg-blue-50 border border-blue-200 rounded-xl p-6">
-                        <div className="flex items-center gap-3 mb-4">
-                          <Shield className="w-6 h-6 text-blue-600" />
-                          <h3 className="text-lg font-bold text-blue-900">Sigurno i anonimno</h3>
-                        </div>
-                        <ul className="text-blue-800 space-y-1 text-sm">
-                          <li>✅ Bez KYC verifikacije</li>
-                          <li>✅ Non-custodial plaćanje</li>
-                          <li>✅ Direktno u vaš wallet</li>
-                          <li>✅ Podržane valute: BTC, USDT, USDC</li>
-                        </ul>
-                      </div>
-
-                      <Button
-                        onClick={handleCryptoPayment}
-                        disabled={isProcessing}
-                        className="w-full h-14 text-lg font-bold bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white rounded-xl"
-                      >
-                        {isProcessing ? (
-                          <>
-                            <Loader2 className="w-5 h-5 animate-spin mr-2" />
-                            Kreiranje plaćanja...
-                          </>
-                        ) : (
-                          "Nastavi sa crypto plaćanjem"
+                          `Plati €${paymentData.selectedOffer.price} - Atlos`
                         )}
                       </Button>
                     </div>
@@ -526,16 +374,16 @@ export default function PaymentPage() {
                 {paymentStep === "processing" && (
                   <div className="text-center py-12">
                     <Loader2 className="w-16 h-16 animate-spin mx-auto mb-6 text-orange-500" />
-                    <h2 className="text-2xl font-bold text-gray-900 mb-4">Kreiranje plaćanja...</h2>
-                    <p className="text-gray-600">Molimo sačekajte dok pripravljamo vaše plaćanje</p>
+                    <h2 className="text-2xl font-bold text-gray-900 mb-4">Otvara se Atlos plaćanje...</h2>
+                    <p className="text-gray-600">Atlos payment widget se učitava...</p>
                   </div>
                 )}
 
                 {paymentStep === "success" && (
                   <div className="text-center py-12">
                     <CheckCircle className="w-16 h-16 mx-auto mb-6 text-green-500" />
-                    <h2 className="text-2xl font-bold text-gray-900 mb-4">Plaćanje kreiranje!</h2>
-                    <p className="text-gray-600 mb-6">Bićete preusmeren na sigurnu stranicu za plaćanje.</p>
+                    <h2 className="text-2xl font-bold text-gray-900 mb-4">Plaćanje uspešno!</h2>
+                    <p className="text-gray-600 mb-6">Preusmeriće vas na stranicu potvrde...</p>
                   </div>
                 )}
               </CardContent>

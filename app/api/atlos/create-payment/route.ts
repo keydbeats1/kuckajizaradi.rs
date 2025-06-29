@@ -3,7 +3,17 @@ import { type NextRequest, NextResponse } from "next/server"
 // Atlos API configuration
 const ATLOS_API_KEY = process.env.ATLOS_API_KEY
 const ATLOS_MERCHANT_ID = process.env.ATLOS_MERCHANT_ID
-const ATLOS_API_URL = "https://api.atlos.io/v1/payments" // Update this with actual Atlos API endpoint
+
+// We need to find the correct Atlos API endpoint
+// Let's try different possible endpoints
+const POSSIBLE_ATLOS_ENDPOINTS = [
+  "https://api.atlos.io/v1/payments",
+  "https://api.atlos.io/payments",
+  "https://atlos.io/api/v1/payments",
+  "https://atlos.io/api/payments",
+  "https://gateway.atlos.io/v1/payments",
+  "https://pay.atlos.io/api/v1/payments",
+]
 
 export async function POST(request: NextRequest) {
   try {
@@ -17,7 +27,7 @@ export async function POST(request: NextRequest) {
       merchantIdLength: ATLOS_MERCHANT_ID?.length || 0,
     })
 
-    // More detailed validation with specific error messages
+    // Validate environment variables
     if (!ATLOS_API_KEY) {
       console.error("❌ Missing ATLOS_API_KEY environment variable")
       return NextResponse.json(
@@ -47,26 +57,16 @@ export async function POST(request: NextRequest) {
       currency: paymentData.currency || "EUR",
       order_id: paymentData.orderId,
       description: paymentData.description || `Payment for ${paymentData.orderId}`,
-
-      // Customer information
       customer_email: paymentData.customerEmail,
       customer_name: paymentData.customerName,
-
-      // URLs for redirects
       success_url: `${process.env.NEXT_PUBLIC_BASE_URL}/payment-success`,
       cancel_url: `${process.env.NEXT_PUBLIC_BASE_URL}/payment-cancelled`,
       callback_url: `${process.env.NEXT_PUBLIC_BASE_URL}/api/atlos/webhook`,
-
-      // Payment method preferences
       payment_methods: paymentData.paymentMethod === "card" ? ["card"] : ["crypto"],
-
-      // If crypto is selected, specify preferred currencies
       ...(paymentData.paymentMethod === "crypto" && {
-        receive_currency: "USDT", // or BTC, ETH, etc.
-        network: "TRC20", // for USDT
+        receive_currency: "USDT",
+        network: "TRC20",
       }),
-
-      // Additional metadata
       metadata: {
         customer_country: paymentData.customerCountry,
         customer_city: paymentData.customerCity,
@@ -77,73 +77,69 @@ export async function POST(request: NextRequest) {
 
     console.log("📤 Sending request to Atlos API:", atlasPaymentRequest)
 
-    // Make request to Atlos API
-    const response = await fetch(ATLOS_API_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${ATLOS_API_KEY}`,
-        // Some APIs use different auth headers
-        "X-API-Key": ATLOS_API_KEY,
-        Accept: "application/json",
-      },
-      body: JSON.stringify(atlasPaymentRequest),
-    })
-
-    console.log("📥 Atlos API response status:", response.status)
-
-    if (!response.ok) {
-      const errorText = await response.text()
-      console.error("❌ Atlos API error:", {
-        status: response.status,
-        statusText: response.statusText,
-        body: errorText,
-      })
-
-      // Try to parse error response
-      let errorMessage = "Payment creation failed"
+    // Try different API endpoints
+    let lastError = null
+    for (const endpoint of POSSIBLE_ATLOS_ENDPOINTS) {
       try {
-        const errorData = JSON.parse(errorText)
-        errorMessage = errorData.message || errorData.error || errorMessage
-      } catch {
-        // If parsing fails, use the raw text
-        errorMessage = errorText || errorMessage
+        console.log(`🔄 Trying endpoint: ${endpoint}`)
+
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${ATLOS_API_KEY}`,
+            "X-API-Key": ATLOS_API_KEY,
+            Accept: "application/json",
+          },
+          body: JSON.stringify(atlasPaymentRequest),
+        })
+
+        console.log(`📥 Response from ${endpoint}:`, response.status)
+
+        if (response.ok) {
+          const result = await response.json()
+          console.log("✅ Atlos API success response:", result)
+
+          const paymentUrl = result.payment_url || result.checkout_url || result.redirect_url || result.url
+
+          if (!paymentUrl) {
+            console.error("❌ No payment URL in Atlos response:", result)
+            continue
+          }
+
+          return NextResponse.json({
+            success: true,
+            paymentUrl: paymentUrl,
+            paymentId: result.payment_id || result.id,
+            orderId: paymentData.orderId,
+            amount: paymentData.amount,
+            currency: paymentData.currency || "EUR",
+            expiresAt: result.expires_at || result.expiry,
+            atlasResponse: result,
+          })
+        } else {
+          const errorText = await response.text()
+          console.error(`❌ Error from ${endpoint}:`, {
+            status: response.status,
+            body: errorText,
+          })
+          lastError = { endpoint, status: response.status, error: errorText }
+        }
+      } catch (error) {
+        console.error(`💥 Failed to connect to ${endpoint}:`, error)
+        lastError = { endpoint, error: error instanceof Error ? error.message : "Unknown error" }
       }
-
-      return NextResponse.json(
-        {
-          error: "Failed to create payment",
-          details: errorMessage,
-          status: response.status,
-        },
-        { status: 500 },
-      )
     }
 
-    const result = await response.json()
-    console.log("✅ Atlos API success response:", result)
-
-    // Extract payment URL from response
-    // The exact field name depends on Atlos API response structure
-    const paymentUrl = result.payment_url || result.checkout_url || result.redirect_url || result.url
-
-    if (!paymentUrl) {
-      console.error("❌ No payment URL in Atlos response:", result)
-      return NextResponse.json({ error: "Invalid payment response - no payment URL received" }, { status: 500 })
-    }
-
-    // Return successful response
-    return NextResponse.json({
-      success: true,
-      paymentUrl: paymentUrl,
-      paymentId: result.payment_id || result.id,
-      orderId: paymentData.orderId,
-      amount: paymentData.amount,
-      currency: paymentData.currency || "EUR",
-      expiresAt: result.expires_at || result.expiry,
-      // Include any other useful data from Atlos response
-      atlasResponse: result,
-    })
+    // If we get here, all endpoints failed
+    return NextResponse.json(
+      {
+        error: "All Atlos API endpoints failed",
+        details: lastError,
+        triedEndpoints: POSSIBLE_ATLOS_ENDPOINTS,
+      },
+      { status: 500 },
+    )
   } catch (error) {
     console.error("💥 Payment creation failed:", error)
 
